@@ -270,11 +270,11 @@ iperf_udp_accept(struct iperf_test *test)
         return -1;
     }
 
-    struct epoll_event ev;
+    struct mtcp_epoll_event ev;
     ev.events=EPOLLIN;
-    ev.data.fd = test->prot_listener;
+    ev.data.sockid = test->prot_listener;
 
-    if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, test->prot_listener, &ev)==-1) {
+    if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, test->prot_listener, &ev)==-1) {
         perror("epoll_ctl: prot_listener register failed");
         return -1;
     }

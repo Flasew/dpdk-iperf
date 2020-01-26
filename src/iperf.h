@@ -46,6 +46,8 @@
 #include "queue.h"
 #include "cjson.h"
 
+#include <mtcp_api.h>
+
 typedef uint64_t iperf_size_t;
 
 struct iperf_interval_results
@@ -324,6 +326,8 @@ struct iperf_test
 
 /* epoll globals */
 #define MAX_EPOLL_EVENTS 10
+
+extern mctx_t mctx;
 
 
 #endif /* !__IPERF_H */

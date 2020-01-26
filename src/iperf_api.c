@@ -79,6 +79,9 @@
 #include "iperf_locale.h"
 #include "version.h"
 
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+
 /* Forwards. */
 static int send_parameters(struct iperf_test *test);
 static int get_parameters(struct iperf_test *test);
@@ -1074,7 +1077,7 @@ iperf_check_throttle(struct iperf_stream *sp, struct timeval *nowP)
 }
 
 int
-iperf_send(struct iperf_test *test, struct epoll_event *ev)
+iperf_send(struct iperf_test *test, struct mtcp_epoll_event *ev)
 {
     register int multisend, r, streams_active;
     register struct iperf_stream *sp;
@@ -1093,7 +1096,7 @@ iperf_send(struct iperf_test *test, struct epoll_event *ev)
             gettimeofday(&now, NULL);
         streams_active = 0;
         SLIST_FOREACH(sp, &test->streams, streams) {
-            if (sp->green_light && ev->data.fd == sp->socket) {
+            if (sp->green_light && ev->data.sockid == sp->socket) {
                 if ((r = sp->snd(sp)) < 0) {
                     if (r == NET_SOFTERROR)
                         break;
@@ -1124,13 +1127,13 @@ iperf_send(struct iperf_test *test, struct epoll_event *ev)
 }
 
 int
-iperf_recv(struct iperf_test *test, struct epoll_event *ev)
+iperf_recv(struct iperf_test *test, struct mtcp_epoll_event *ev)
 {
     int r;
     struct iperf_stream *sp;
 
     SLIST_FOREACH(sp, &test->streams, streams) {
-        if (ev->data.fd == sp->socket) {
+        if (ev->data.sockid == sp->socket) {
             if ((r = sp->rcv(sp)) < 0) {
                 i_errno = IESTREAMREAD;
                 return r;
@@ -1246,12 +1249,12 @@ iperf_exchange_parameters(struct iperf_test *test)
         }
         test->prot_listener = s;
 
-        struct epoll_event ev;
+        struct mtcp_epoll_event ev;
         ev.events=EPOLLIN;
-        ev.data.fd = s;
+        ev.data.sockid = s;
 
         // Add this socket to epoll, if it isn't already added
-        if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1 && errno != EEXIST) {
+        if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1 && errno != EEXIST) {
             perror("epoll_ctl: exchange_parameters register failed");
             return -1;
         }

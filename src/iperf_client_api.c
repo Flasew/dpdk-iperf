@@ -36,6 +36,9 @@
 #include <sys/uio.h>
 #include <arpa/inet.h>
 
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+
 #include "iperf.h"
 #include "iperf_api.h"
 #include "iperf_util.h"
@@ -59,14 +62,14 @@ iperf_create_streams(struct iperf_test *test)
         if ((s = test->protocol->connect(test)) < 0)
             return -1;
 
-        struct epoll_event ev;
-        ev.data.fd = s;
+        struct mtcp_epoll_event ev;
+        ev.data.sockid = s;
         if (test->sender)
             ev.events=EPOLLOUT;
         else
             ev.events=EPOLLIN;
-        if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1) {
-            perror("epoll_ctl: stream_socket register failed");
+        if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1) {
+            perror("mtcp_epoll_ctl: stream_socket register failed");
             return -1;
         }
 
@@ -208,7 +211,7 @@ iperf_handle_message_client(struct iperf_test *test)
     }
 
     /*!!! Why is this read() and not Nread()? */
-    if ((rval = read(test->ctrl_sck, (char*) &test->state, sizeof(signed char))) <= 0) {
+    if ((rval = mtcp_read(mctx, test->ctrl_sck, (char*) &test->state, sizeof(signed char))) <= 0) {
         if (rval == 0) {
             i_errno = IECTRLCLOSE;
             return -1;
@@ -299,7 +302,7 @@ iperf_handle_message_client(struct iperf_test *test)
 int
 iperf_connect(struct iperf_test *test)
 {
-    test->epoll_fd = epoll_create(MAX_EPOLL_EVENTS);
+    test->epoll_fd = mtcp_epoll_create(mctx, MAX_EPOLL_EVENTS);
     if(test->epoll_fd < 0) {
         printf("create epoll socket failed \n");
         return -1;
@@ -321,12 +324,12 @@ iperf_connect(struct iperf_test *test)
     //     return -1;
     // }
 
-    struct epoll_event ev;
+    struct mtcp_epoll_event ev;
     ev.events=EPOLLIN;
-    ev.data.fd = test->ctrl_sck;
+    ev.data.sockid = test->ctrl_sck;
 
-    if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, test->ctrl_sck, &ev)==-1) {
-        perror("epoll_ctl: ctrl_sck register failed");
+    if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, test->ctrl_sck, &ev)==-1) {
+        perror("mtcp_epoll_ctl: ctrl_sck register failed");
         return -1;
     }
     setnonblocking(test->ctrl_sck, 1);
@@ -342,7 +345,7 @@ iperf_client_end(struct iperf_test *test)
 
     /* Close all stream sockets */
     SLIST_FOREACH(sp, &test->streams, streams) {
-        close(sp->socket);
+        mctp_close(mctx, sp->socket);
     }
 
     /* show final summary */
@@ -364,7 +367,7 @@ iperf_run_client(struct iperf_test * test)
     struct timeval now;
     struct timeval* timeout = NULL;
     struct iperf_stream *sp;
-    struct epoll_event events[MAX_EPOLL_EVENTS];
+    struct mtcp_epoll_event events[MAX_EPOLL_EVENTS];
 
     if (test->affinity != -1)
         if (iperf_setaffinity(test, test->affinity) != 0)
@@ -395,13 +398,13 @@ iperf_run_client(struct iperf_test * test)
     while (test->state != IPERF_DONE) {
         (void) gettimeofday(&now, NULL);
         timeout = tmr_timeout(&now);
-        number_of_events = epoll_wait(test->epoll_fd, events, MAX_EPOLL_EVENTS, 0);
+        number_of_events = mtcp_epoll_wait(mctx, test->epoll_fd, events, MAX_EPOLL_EVENTS, 0);
         if (number_of_events < 0 && errno != EINTR) {
             i_errno = IESELECT;
             return -1;
         }
         for (i = 0; i < number_of_events; i++) {
-            if (events[i].data.fd == test->ctrl_sck) {
+            if (events[i].data.sockid == test->ctrl_sck) {
                  if (iperf_handle_message_client(test) < 0) {
                     return -1;
                 }

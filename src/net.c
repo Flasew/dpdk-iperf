@@ -46,7 +46,7 @@
 #ifdef __FreeBSD__
 #include <sys/uio.h>
 #else
-#if defined(__APPLE__) && defined(__MACH__)	/* OS X */
+#if defined(__APPLE__) && defined(__MACH__)     /* OS X */
 #include <AvailabilityMacros.h>
 #if defined(MAC_OS_X_VERSION_10_6)
 #include <sys/uio.h>
@@ -59,6 +59,11 @@
 #include "iperf_util.h"
 #include "net.h"
 #include "timer.h"
+
+#include <mtcp_api.h>
+// #include <mtcp_epoll.h>
+
+mctx_t mctx;
 
 /* netdial and netannouce code comes from libtask: http://swtch.com/libtask/
  * Copyright: http://swtch.com/libtask/COPYRIGHT
@@ -85,11 +90,11 @@ netdial(int domain, int proto, char *local, int local_port, char *server, int po
     if (getaddrinfo(server, NULL, &hints, &server_res) != 0)
         return -1;
 
-    s = socket(server_res->ai_family, proto, 0);
+    s = mtcp_socket(mctx, server_res->ai_family, proto, 0);
     if (s < 0) {
-	if (local)
-	    freeaddrinfo(local_res);
-	freeaddrinfo(server_res);
+        if (local)
+            freeaddrinfo(local_res);
+        freeaddrinfo(server_res);
         return -1;
     }
 
@@ -101,24 +106,24 @@ netdial(int domain, int proto, char *local, int local_port, char *server, int po
             local_res->ai_addr = (struct sockaddr *)lcladdr;
         }
 
-        if (bind(s, (struct sockaddr *) local_res->ai_addr, local_res->ai_addrlen) < 0) {
-	    close(s);
-	    freeaddrinfo(local_res);
-	    freeaddrinfo(server_res);
+        if (mtcp_bind(mctx, s, (struct sockaddr *) local_res->ai_addr, local_res->ai_addrlen) < 0) {
+            mtcp_close(mctx, s);
+            freeaddrinfo(local_res);
+            freeaddrinfo(server_res);
             return -1;
-	}
+        }
         freeaddrinfo(local_res);
     }
 
     ((struct sockaddr_in *) server_res->ai_addr)->sin_port = htons(port);
     int try_connect_count = 5;
     while (try_connect_count-- && \
-		(connect(s, (struct sockaddr *) server_res->ai_addr, server_res->ai_addrlen) < 0 && errno == EINPROGRESS)) {
-	if (try_connect_count <= 0) {
-	    close(s);
-	    freeaddrinfo(server_res);
+                (mtcp_connect(mctx, s, (struct sockaddr *) server_res->ai_addr, server_res->ai_addrlen) < 0 && errno == EINPROGRESS)) {
+        if (try_connect_count <= 0) {
+            mtcp_close(mctx, s);
+            freeaddrinfo(server_res);
             return -1;
-	}
+        }
         sleep(1);
     }
     
@@ -150,28 +155,28 @@ netannounce(int domain, int proto, char *local, int port)
      * result structure is set to AF_INET6.
      */
     if (domain == AF_UNSPEC && !local) {
-	hints.ai_family = AF_INET6;
+        hints.ai_family = AF_INET6;
     }
     else {
-	hints.ai_family = domain;
+        hints.ai_family = domain;
     }
     hints.ai_socktype = proto;
     hints.ai_flags = AI_PASSIVE;
     if (getaddrinfo(local, portstr, &hints, &res) != 0)
         return -1;
 
-    s = socket(res->ai_family, proto, 0);
+    s = mtcp_socket(mctx, res->ai_family, proto, 0);
     if (s < 0) {
-	freeaddrinfo(res);
+        freeaddrinfo(res);
         return -1;
     }
 
     opt = 1;
-    if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
-		   (char *) &opt, sizeof(opt)) < 0) {
-	close(s);
-	freeaddrinfo(res);
-	return -1;
+    if (mtcp_setsockopt(mctx, s, SOL_SOCKET, SO_REUSEADDR,
+                   (char *) &opt, sizeof(opt)) < 0) {
+        mtcp_close(mctx, s);
+        freeaddrinfo(res);
+        return -1;
     }
     /*
      * If we got an IPv6 socket, figure out if it should accept IPv4
@@ -183,30 +188,30 @@ netannounce(int domain, int proto, char *local, int port)
      */
 #if defined(IPV6_V6ONLY) && !defined(__OpenBSD__)
     if (res->ai_family == AF_INET6 && (domain == AF_UNSPEC || domain == AF_INET6)) {
-	if (domain == AF_UNSPEC)
-	    opt = 0;
-	else
-	    opt = 1;
-	if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY,
-		       (char *) &opt, sizeof(opt)) < 0) {
-	    close(s);
-	    freeaddrinfo(res);
-	    return -1;
-	}
+        if (domain == AF_UNSPEC)
+            opt = 0;
+        else
+            opt = 1;
+        if (mtcp_setsockopt(mctx, s, IPPROTO_IPV6, IPV6_V6ONLY,
+                       (char *) &opt, sizeof(opt)) < 0) {
+            mtcp_close(mctx, s);
+            freeaddrinfo(res);
+            return -1;
+        }
     }
 #endif /* IPV6_V6ONLY */
 
-    if (bind(s, (struct sockaddr *) res->ai_addr, res->ai_addrlen) < 0) {
-        close(s);
-	freeaddrinfo(res);
+    if (mtcp_bind(mctx, s, (struct sockaddr *) res->ai_addr, res->ai_addrlen) < 0) {
+        mtcp_close(mctx, s);
+        freeaddrinfo(res);
         return -1;
     }
 
     freeaddrinfo(res);
 
     if (proto == SOCK_STREAM) {
-        if (listen(s, 5) < 0) {
-	    close(s);
+        if (mtcp_listen(mctx, s, 5) < 0) {
+            mtcp_close(mctx, s);
             return -1;
         }
     }
@@ -226,7 +231,7 @@ Nread(int fd, char *buf, size_t count, int prot)
     register size_t nleft = count;
 
     while (nleft > 0) {
-        r = read(fd, buf, nleft);
+        r = mtcp_read(mctx, fd, buf, nleft);
         if (r < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
@@ -253,26 +258,26 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
     register size_t nleft = count;
 
     while (nleft > 0) {
-	r = write(fd, buf, nleft);
-	if (r < 0) {
-	    switch (errno) {
-		case EINTR:
-		case EAGAIN:
+        r = mtcp_write(mctx, fd, buf, nleft);
+        if (r < 0) {
+            switch (errno) {
+                case EINTR:
+                case EAGAIN:
 #if (EAGAIN != EWOULDBLOCK)
-		case EWOULDBLOCK:
+                case EWOULDBLOCK:
 #endif
-		return count - nleft;
+                return count - nleft;
 
-		case ENOBUFS:
-		return NET_SOFTERROR;
+                case ENOBUFS:
+                return NET_SOFTERROR;
 
-		default:
-		return NET_HARDERROR;
-	    }
-	} else if (r == 0)
-	    return NET_SOFTERROR;
-	nleft -= r;
-	buf += r;
+                default:
+                return NET_HARDERROR;
+            }
+        } else if (r == 0)
+            return NET_SOFTERROR;
+        nleft -= r;
+        buf += r;
     }
     return count;
 }
@@ -307,50 +312,50 @@ Nsendfile(int fromfd, int tofd, const char *buf, size_t count)
 
     nleft = count;
     while (nleft > 0) {
-	offset = count - nleft;
+        offset = count - nleft;
 #ifdef linux
-	r = sendfile(tofd, fromfd, &offset, nleft);
-	if (r > 0)
-	    nleft -= r;
+        r = sendfile(tofd, fromfd, &offset, nleft);
+        if (r > 0)
+            nleft -= r;
 #elif defined(__FreeBSD__)
-	r = sendfile(fromfd, tofd, offset, nleft, NULL, &sent, 0);
-	nleft -= sent;
-#elif defined(__APPLE__) && defined(__MACH__) && defined(MAC_OS_X_VERSION_10_6)	/* OS X */
-	sent = nleft;
-	r = sendfile(fromfd, tofd, offset, &sent, NULL, 0);
-	nleft -= sent;
+        r = sendfile(fromfd, tofd, offset, nleft, NULL, &sent, 0);
+        nleft -= sent;
+#elif defined(__APPLE__) && defined(__MACH__) && defined(MAC_OS_X_VERSION_10_6) /* OS X */
+        sent = nleft;
+        r = sendfile(fromfd, tofd, offset, &sent, NULL, 0);
+        nleft -= sent;
 #else
-	/* Shouldn't happen. */
-	r = -1;
-	errno = ENOSYS;
+        /* Shouldn't happen. */
+        r = -1;
+        errno = ENOSYS;
 #endif
-	if (r < 0) {
-	    switch (errno) {
-		case EINTR:
-		case EAGAIN:
+        if (r < 0) {
+            switch (errno) {
+                case EINTR:
+                case EAGAIN:
 #if (EAGAIN != EWOULDBLOCK)
-		case EWOULDBLOCK:
+                case EWOULDBLOCK:
 #endif
-		if (count == nleft)
-		    return NET_SOFTERROR;
-		return count - nleft;
+                if (count == nleft)
+                    return NET_SOFTERROR;
+                return count - nleft;
 
-		case ENOBUFS:
-		case ENOMEM:
-		return NET_SOFTERROR;
+                case ENOBUFS:
+                case ENOMEM:
+                return NET_SOFTERROR;
 
-		default:
-		return NET_HARDERROR;
-	    }
-	}
+                default:
+                return NET_HARDERROR;
+            }
+        }
 #ifdef linux
-	else if (r == 0)
-	    return NET_SOFTERROR;
+        else if (r == 0)
+            return NET_SOFTERROR;
 #endif
     }
     return count;
 #else /* HAVE_SENDFILE */
-    errno = ENOSYS;	/* error if somehow get called without HAVE_SENDFILE */
+    errno = ENOSYS;     /* error if somehow get called without HAVE_SENDFILE */
     return NET_HARDERROR;
 #endif /* HAVE_SENDFILE */
 }
@@ -374,10 +379,10 @@ getsock_tcp_mss(int inSock)
 
     /* query for mss */
     len = sizeof(mss);
-    rc = getsockopt(inSock, IPPROTO_TCP, TCP_MAXSEG, (char *)&mss, &len);
+    rc = mtcp_getsockopt(mctx, inSock, IPPROTO_TCP, TCP_MAXSEG, (char *)&mss, &len);
     if (rc == -1) {
-	perror("getsockopt TCP_MAXSEG");
-	return -1;
+        perror("getsockopt TCP_MAXSEG");
+        return -1;
     }
 
     return mss;
@@ -399,7 +404,7 @@ set_tcp_options(int sock, int no_delay, int mss)
 
     if (no_delay == 1) {
         len = sizeof(no_delay);
-        rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *)&no_delay, len);
+        rc = mtcp_setsockopt(mctx, sock, IPPROTO_TCP, TCP_NODELAY, (char *)&no_delay, len);
         if (rc == -1) {
             perror("setsockopt TCP_NODELAY");
             return -1;
@@ -413,13 +418,13 @@ set_tcp_options(int sock, int no_delay, int mss)
         /* set */
         new_mss = mss;
         len = sizeof(new_mss);
-        rc = setsockopt(sock, IPPROTO_TCP, TCP_MAXSEG, (char *)&new_mss, len);
+        rc = mtcp_setsockopt(mctx, sock, IPPROTO_TCP, TCP_MAXSEG, (char *)&new_mss, len);
         if (rc == -1) {
             perror("setsockopt TCP_MAXSEG");
             return -1;
         }
         /* verify results */
-        rc = getsockopt(sock, IPPROTO_TCP, TCP_MAXSEG, (char *)&new_mss, &len);
+        rc = mtcp_getsockopt(mctx, sock, IPPROTO_TCP, TCP_MAXSEG, (char *)&new_mss, &len);
         if (rc == -1) {
             perror("getsockopt TCP_MAXSEG");
             return -1;
@@ -438,22 +443,19 @@ set_tcp_options(int sock, int no_delay, int mss)
 int
 setnonblocking(int fd, int nonblocking)
 {
-    int flags, newflags;
 
-    flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        perror("fcntl(F_GETFL)");
-        return -1;
+    if (nonblocking) {
+       if (mtcp_setsock_nonblock(mctx, fd) < 0) {
+            perror("mtcp_setsock_nonblock");
+            return -1;
+       }
     }
-    if (nonblocking)
-	newflags = flags | (int) O_NONBLOCK;
-    else
-	newflags = flags & ~((int) O_NONBLOCK);
-    if (newflags != flags)
-	if (fcntl(fd, F_SETFL, newflags) < 0) {
-	    perror("fcntl(F_SETFL)");
-	    return -1;
-	}
+    else {
+        if (mtcp_setsock_block(mctx, fd) < 0) {
+            perror("mtcp_setsock_block");
+            return -1;
+       }
+    }
     return 0;
 }
 
@@ -465,7 +467,7 @@ getsockdomain(int sock)
     struct sockaddr_storage sa;
     socklen_t len = sizeof(sa);
 
-    if (getsockname(sock, (struct sockaddr *)&sa, &len) < 0) {
+    if (mtcp_getsockname(mctx, sock, (struct sockaddr *)&sa, &len) < 0) {
         return -1;
     }
     return ((struct sockaddr *) &sa)->sa_family;

@@ -53,15 +53,59 @@
 #include "iperf_locale.h"
 #include "net.h"
 
+#include <mtcp_api.h>
+
+struct thread_context
+{
+    int core;
+    mctx_t mctx;
+};
 
 static int run(struct iperf_test *test);
 
+void
+SignalHandler(int signum)
+{
+  return;
+}
 
 /**************************************************************************/
 int
 main(int argc, char **argv)
 {
     struct iperf_test *test;
+    int core = 0;
+    struct mtcp_conf mcfg;
+    struct thread_context * ctx;
+    mtcp_getconf(&mcfg);
+    mcfg.num_cores = 1;
+    mtcp_setconf(&mcfg);
+    fprintf(stderr, "Initializing mtcp...\n");
+    if (mtcp_init("iperf.conf")) {
+        fprintf(stderr, "Failed to initialize mtcp.\n");
+        return -1;
+    }
+    mtcp_getconf(&mcfg);
+    mcfg.max_concurrency = 3;
+    mcfg.max_num_buffers = 3;
+    mtcp_setconf(&mcfg);
+    mtcp_register_signal(SIGINT, SignalHandler);
+
+    fprintf(stderr, "Creating thread context...\n");
+    mtcp_core_affinitize(core);
+    ctx = (struct thread_context *) calloc(1, sizeof(struct thread_context));
+    if (!ctx) {
+        fprintf(stderr, "Failed to create context.\n");
+        perror("calloc");
+        return -1;
+    }
+    ctx->core = core;
+    ctx->mctx = mtcp_create_context(core);
+    if (!ctx->mctx) {
+        fprintf(stderr, "Failed to create mtcp context.\n");
+        return -1;
+    }
+    mctx = ctx->mctx;
 
     // XXX: Setting the process affinity requires root on most systems.
     //      Is this a feature we really need?

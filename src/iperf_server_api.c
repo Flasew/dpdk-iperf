@@ -63,6 +63,9 @@
 #include "iperf_util.h"
 #include "iperf_locale.h"
 
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+
 
 int
 iperf_server_listen(struct iperf_test *test)
@@ -120,17 +123,17 @@ iperf_server_listen(struct iperf_test *test)
 
 
 
-    test->epoll_fd = epoll_create(MAX_EPOLL_EVENTS);
+    test->epoll_fd = mtcp_epoll_create(MAX_EPOLL_EVENTS);
     if(test->epoll_fd < 0) {
         printf("create epoll socket failed \n");
         return -1;
     }
 
-    struct epoll_event ev;
+    struct mtcp_epoll_event ev;
     ev.events=EPOLLIN;
-    ev.data.fd = test->listener;
+    ev.data.sockid = test->listener;
 
-    if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, test->listener, &ev)==-1) {
+    if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, test->listener, &ev)==-1) {
         perror("epoll_ctl: listener register failed");
         return -1;
     }
@@ -161,11 +164,11 @@ iperf_accept(struct iperf_test *test)
         //     return -1;
         // }
 
-        struct epoll_event ev;
+        struct mtcp_epoll_event ev;
         ev.events=EPOLLIN;
-        ev.data.fd = test->ctrl_sck;
+        ev.data.sockid = test->ctrl_sck;
 
-        if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, test->ctrl_sck, &ev)==-1) {
+        if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, test->ctrl_sck, &ev)==-1) {
             perror("epoll_ctl: ctrl_sck register failed");
             return -1;
         }
@@ -183,7 +186,7 @@ iperf_accept(struct iperf_test *test)
             i_errno = IESENDMESSAGE;
             return -1;
         }
-        close(s);
+        mtcp_close(mctx, s);
     }
 
 
@@ -249,7 +252,7 @@ iperf_handle_message_server(struct iperf_test *test)
             cpu_util(test->cpu_util);
             test->stats_callback(test);
             SLIST_FOREACH(sp, &test->streams, streams) {
-                close(sp->socket);
+                mtcp_close(mctx, sp->socket);
             }
             test->reporter_callback(test);
             if (iperf_set_send_state(test, EXCHANGE_RESULTS_CLIENT) != 0)
@@ -271,7 +274,7 @@ iperf_handle_message_server(struct iperf_test *test)
             // XXX: Remove this line below!
             iperf_err(test, "the client has terminated");
             SLIST_FOREACH(sp, &test->streams, streams) {
-                close(sp->socket);
+                mtcp_close(mctx, sp->socket);
             }
             test->state = IPERF_DONE;
             break;
@@ -290,7 +293,7 @@ iperf_test_reset(struct iperf_test *test)
 {
     struct iperf_stream *sp;
 
-    close(test->ctrl_sck);
+    mtcp_close(mctx, test->ctrl_sck);
 
     /* Free streams */
     while (!SLIST_EMPTY(&test->streams)) {
@@ -443,8 +446,8 @@ static void
 cleanup_server(struct iperf_test *test)
 {
     /* Close open test sockets */
-    close(test->ctrl_sck);
-    close(test->listener);
+    mtcp_close(mctx, test->ctrl_sck);
+    mtcp_close(mctx, test->listener);
 
     /* Cancel any remaining timers. */
     if (test->stats_timer != NULL) {
@@ -469,7 +472,7 @@ iperf_run_server(struct iperf_test *test)
     struct iperf_stream *sp;
     struct timeval now;
     struct timeval* timeout;
-    struct epoll_event events[MAX_EPOLL_EVENTS];
+    struct mtcp_epoll_event events[MAX_EPOLL_EVENTS];
 
 
     if (test->affinity != -1)
@@ -505,14 +508,14 @@ iperf_run_server(struct iperf_test *test)
 
         (void) gettimeofday(&now, NULL);
         timeout = tmr_timeout(&now);
-        number_of_events = epoll_wait(test->epoll_fd, events, MAX_EPOLL_EVENTS, 0);
+        number_of_events = mtcp_epoll_wait(mctx, test->epoll_fd, events, MAX_EPOLL_EVENTS, 0);
         if (number_of_events < 0 && errno != EINTR) {
             cleanup_server(test);
             i_errno = IESELECT;
             return -1;
         }
         for (i = 0; i < number_of_events; i++) {
-            if (events[i].data.fd == test->listener) {
+            if (events[i].data.sockid == test->listener) {
                 if (test->state != CREATE_STREAMS) {
                     if (iperf_accept(test) < 0) {
                         cleanup_server(test);
@@ -521,7 +524,7 @@ iperf_run_server(struct iperf_test *test)
                 }
             }
 
-            if (events[i].data.fd == test->ctrl_sck) {
+            if (events[i].data.sockid == test->ctrl_sck) {
                 if (iperf_handle_message_server(test) < 0) {
                     cleanup_server(test);
                     return -1;
@@ -530,7 +533,7 @@ iperf_run_server(struct iperf_test *test)
 
             if (test->state == CREATE_STREAMS) {
 
-                if (events[i].data.fd == test->prot_listener) {
+                if (events[i].data.sockid == test->prot_listener) {
 
                     if ((s = test->protocol->accept(test)) == -1) {
                         cleanup_server(test);
@@ -544,8 +547,8 @@ iperf_run_server(struct iperf_test *test)
                             return -1;
                         }
 
-                        struct epoll_event ev;
-                        ev.data.fd = s;
+                        struct mtcp_epoll_event ev;
+                        ev.data.sockid = s;
                         if (test->sender) {
                             ev.events=EPOLLOUT;
                         }
@@ -556,8 +559,8 @@ iperf_run_server(struct iperf_test *test)
                         // Modify this socket or add if it it doesn't exist
                         // For UDP it needs to be modified and for TCP it needs
                         // to be added.
-                        if(epoll_ctl(test->epoll_fd, EPOLL_CTL_MOD, s, &ev)==-1) {
-                            if (errno != ENOENT || epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1) {
+                        if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_MOD, s, &ev)==-1) {
+                            if (errno != ENOENT || mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, s, &ev)==-1) {
                                 perror("epoll_ctl: stream_socket register failed");
                                 return -1;
                             }
@@ -579,10 +582,10 @@ iperf_run_server(struct iperf_test *test)
 
                 if (streams_accepted == test->num_streams) {
                     if (test->protocol->id != Ptcp) {
-                        close(test->prot_listener);
+                        mtcp_close(mctx, test->prot_listener);
                     } else {
                         if (test->no_delay || test->settings->mss || test->settings->socket_bufsize) {
-                            close(test->listener);
+                            mtcp_close(mctx, test->listener);
                             if ((s = netannounce(test->settings->domain, Ptcp, test->bind_address, test->server_port)) < 0) {
                                 cleanup_server(test);
                                 i_errno = IELISTEN;
@@ -590,11 +593,11 @@ iperf_run_server(struct iperf_test *test)
                             }
                             test->listener = s;
 
-                            struct epoll_event ev;
+                            struct mtcp_epoll_event ev;
                             ev.events=EPOLLIN;
-                            ev.data.fd = test->listener;
+                            ev.data.sockid = test->listener;
 
-                            if(epoll_ctl(test->epoll_fd, EPOLL_CTL_ADD, test->listener, &ev)==-1) {
+                            if(mtcp_epoll_ctl(mctx, test->epoll_fd, EPOLL_CTL_ADD, test->listener, &ev)==-1) {
                                 perror("epoll_ctl: stream_socket register failed");
                                 return -1;
                             }

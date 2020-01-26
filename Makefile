@@ -1,13 +1,10 @@
-
-#  iperf, Copyright (c) 2014, 2016, The Regents of the University of
-#  California, through Lawrence Berkeley National Laboratory (subject
 #  to receipt of any required approvals from the U.S. Dept. of
 #  Energy).  All rights reserved.
-#  
+#
 #  If you have questions about your rights to use or distribute this
 #  software, please contact Berkeley Lab's Technology Transfer
 #  Department at TTD@lbl.gov.
-#  
+#
 #  NOTICE.  This software is owned by the U.S. Department of Energy.
 #  As such, the U.S. Government has been granted for itself and others
 #  acting on its behalf a paid-up, nonexclusive, irrevocable,
@@ -20,7 +17,7 @@
 #  irrevocable, worldwide license in the Software to reproduce,
 #  prepare derivative works, distribute copies to the public, perform
 #  publicly and display publicly, and to permit others to do so.
-#  
+#
 #  This code is distributed under a BSD style license, see the LICENSE
 #  file for complete information.
 
@@ -28,13 +25,16 @@ CC = gcc
 RM = rm -f
 
 DPDK_CFLAGS += -O3 \
-    -I$(RTE_ANS)/librte_ans/include \
-    -I$(RTE_ANS)/librte_anssock/include
+    -I$(MTCPROOT)/mtcp/include/ \
+    -I${MTCPROOT}/io_engine/include/
 
-DPDK_LDLIBS += $(RTE_ANS)/librte_anssock/librte_anssock.a \
+DPDK_LDLIBS += ${MTCPROOT}/mtcp/lib/libmtcp.a  \
           -L$(RTE_SDK)/$(RTE_TARGET)/lib \
-          -Wl,--whole-archive -Wl,-lrte_mbuf -Wl,-lrte_mempool_ring -Wl,-lrte_mempool -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_kvargs -Wl,--no-whole-archive -Wl,-export-dynamic -lnuma\
+          # -Wl,--whole-archive -Wl,-lrte_mbuf -Wl,-lrte_mempool_ring -Wl,-lrte_mempool -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_kvargs -Wl,--no-whole-archive -Wl,-export-dynamic -lnuma\
           -lrt -pthread -ldl
+DPDK_MACHINE_LINKER_FLAGS=$${RTE_SDK}/$${RTE_TARGET}/lib/ldflags.txt
+DPDK_MACHINE_LDFLAGS=$(shell cat ${DPDK_MACHINE_LINKER_FLAGS})
+DPDK_LDLIBS += -g -O3 -pthread -lrt -march=native  -lnuma -lpthread -lrt -ldl -lgmp ${DPDK_MACHINE_LDFLAGS}
 
 DPDK_OBJS = ./src/cjson.dpdk.o        ./src/iperf_client_api.dpdk.o \
             ./src/iperf_locale.dpdk.o ./src/iperf_server_api.dpdk.o \
@@ -43,38 +43,26 @@ DPDK_OBJS = ./src/cjson.dpdk.o        ./src/iperf_client_api.dpdk.o \
             ./src/units.dpdk.o        ./src/iperf_api.dpdk.o \
             ./src/iperf_error.dpdk.o  ./src/iperf_tcp.dpdk.o \
             ./src/iperf_util.dpdk.o   ./src/net.dpdk.o \
-            ./src/tcp_window_size.dpdk.o ./src/ans_module.dpdk.o
+            ./src/dscp.dpdk.o         ./src/iperf_auth.dpdk.o \
+            ./src/iperf_time.dpdk.o
 
-ORIG_OBJS = ./src/cjson.o        ./src/iperf_client_api.o \
-            ./src/iperf_locale.o ./src/iperf_server_api.o \
-            ./src/iperf_udp.o    ./src/main.o \
-            ./src/tcp_info.o     ./src/timer.o \
-            ./src/units.o        ./src/iperf_api.o \
-            ./src/iperf_error.o  ./src/iperf_tcp.o \
-            ./src/iperf_util.o   ./src/net.o \
-            ./src/tcp_window_size.o 
-	      
+
 DPDK_TARGET = dpdk_iperf3
 ORIG_TARGET = iperf3
 
-$(DPDK_TARGET):$(DPDK_OBJS)                      
-	$(CC) -o $(DPDK_TARGET) $(DPDK_OBJS) $(DPDK_CFLAGS) $(DPDK_LDLIBS)
+$(DPDK_TARGET):$(DPDK_OBJS)
+        $(CC) -o $(DPDK_TARGET) $(DPDK_OBJS) $(DPDK_CFLAGS) $(DPDK_LDLIBS)
 
-$(ORIG_TARGET):$(ORIG_OBJS)                      
-	$(CC) -o $(ORIG_TARGET) $(ORIG_OBJS) 
+$(ORIG_TARGET):$(ORIG_OBJS)
+        $(CC) -o $(ORIG_TARGET) $(ORIG_OBJS)
 
-$(DPDK_OBJS):%.dpdk.o:%.c          
-	$(CC) -D_HAVE_DPDK_ANS_ -c $(DPDK_CFLAGS) $< -o $@
-        
-$(OBJS):%.o:%.c          
-	$(CC) -c $< -o $@
+$(DPDK_OBJS):%.dpdk.o:%.c
+        $(CC) -c $(DPDK_CFLAGS) $< -o $@
 
-all: $(DPDK_TARGET) $(ORIG_TARGET)
+$(OBJS):%.o:%.c
+        $(CC) -c $< -o $@
 
 dpdk-iperf: $(DPDK_TARGET)
 
-iperf: $(ORIG_TARGET)
-	        
-clean:                              
-	-$(RM) $(DPDK_TARGET) $(DPDK_OBJS)
-	-$(RM) $(ORIG_TARGET) $(ORIG_OBJS)
+clean:
+        -$(RM) $(DPDK_TARGET) $(DPDK_OBJS)
