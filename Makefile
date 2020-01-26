@@ -43,26 +43,25 @@ DPDK_OBJS = ./src/cjson.dpdk.o        ./src/iperf_client_api.dpdk.o \
             ./src/units.dpdk.o        ./src/iperf_api.dpdk.o \
             ./src/iperf_error.dpdk.o  ./src/iperf_tcp.dpdk.o \
             ./src/iperf_util.dpdk.o   ./src/net.dpdk.o \
-            ./src/dscp.dpdk.o         ./src/iperf_auth.dpdk.o \
-            ./src/iperf_time.dpdk.o
+						./src/tcp_window_size.dpdk.o
 
 
 DPDK_TARGET = dpdk_iperf3
 ORIG_TARGET = iperf3
 
 $(DPDK_TARGET):$(DPDK_OBJS)
-        $(CC) -o $(DPDK_TARGET) $(DPDK_OBJS) $(DPDK_CFLAGS) $(DPDK_LDLIBS)
+	$(CC) -o $(DPDK_TARGET) $(DPDK_OBJS) $(DPDK_CFLAGS) $(DPDK_LDLIBS)
 
 $(ORIG_TARGET):$(ORIG_OBJS)
-        $(CC) -o $(ORIG_TARGET) $(ORIG_OBJS)
+	$(CC) -o $(ORIG_TARGET) $(ORIG_OBJS)
 
 $(DPDK_OBJS):%.dpdk.o:%.c
-        $(CC) -c $(DPDK_CFLAGS) $< -o $@
+	$(CC) -c $(DPDK_CFLAGS) $< -o $@
 
 $(OBJS):%.o:%.c
-        $(CC) -c $< -o $@
+	$(CC) -c $< -o $@
 
 dpdk-iperf: $(DPDK_TARGET)
 
 clean:
-        -$(RM) $(DPDK_TARGET) $(DPDK_OBJS)
+	$(RM) $(DPDK_TARGET) $(DPDK_OBJS)

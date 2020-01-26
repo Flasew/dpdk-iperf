@@ -345,7 +345,7 @@ iperf_client_end(struct iperf_test *test)
 
     /* Close all stream sockets */
     SLIST_FOREACH(sp, &test->streams, streams) {
-        mctp_close(mctx, sp->socket);
+        mtcp_close(mctx, sp->socket);
     }
 
     /* show final summary */

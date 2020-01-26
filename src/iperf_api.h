@@ -29,6 +29,7 @@
 
 #include <sys/time.h>
 #include <setjmp.h>
+#include <mtcp_epoll.h>
 
 struct iperf_test;
 struct iperf_stream_result;
