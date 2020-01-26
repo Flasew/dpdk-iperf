@@ -162,11 +162,14 @@ netannounce(int domain, int proto, char *local, int port)
     }
     hints.ai_socktype = proto;
     hints.ai_flags = AI_PASSIVE;
-    if (getaddrinfo(local, portstr, &hints, &res) != 0)
+    if (getaddrinfo(local, portstr, &hints, &res) != 0) {
+        perror("netannounce::getaddrinfo()");
         return -1;
+    }
 
     s = mtcp_socket(mctx, res->ai_family, proto, 0);
     if (s < 0) {
+        perror("netannounce::mtcp_socket()");
         freeaddrinfo(res);
         return -1;
     }
@@ -174,6 +177,7 @@ netannounce(int domain, int proto, char *local, int port)
     opt = 1;
     if (mtcp_setsockopt(mctx, s, SOL_SOCKET, SO_REUSEADDR,
                    (char *) &opt, sizeof(opt)) < 0) {
+        perror("netannounce::mtcp_setsockopt(SO_REUSEADDR)");
         mtcp_close(mctx, s);
         freeaddrinfo(res);
         return -1;
@@ -194,6 +198,7 @@ netannounce(int domain, int proto, char *local, int port)
             opt = 1;
         if (mtcp_setsockopt(mctx, s, IPPROTO_IPV6, IPV6_V6ONLY,
                        (char *) &opt, sizeof(opt)) < 0) {
+            perror("netannounce::mtcp_setsockopt(IPV6_V6ONLY)");
             mtcp_close(mctx, s);
             freeaddrinfo(res);
             return -1;
@@ -202,6 +207,7 @@ netannounce(int domain, int proto, char *local, int port)
 #endif /* IPV6_V6ONLY */
 
     if (mtcp_bind(mctx, s, (struct sockaddr *) res->ai_addr, res->ai_addrlen) < 0) {
+        perror("netannounce::mtcp_bind()");
         mtcp_close(mctx, s);
         freeaddrinfo(res);
         return -1;
