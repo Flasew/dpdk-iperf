@@ -216,7 +216,8 @@ netannounce(int domain, int proto, char *local, int port)
     freeaddrinfo(res);
 
     if (proto == SOCK_STREAM) {
-        if (mtcp_listen(mctx, s, 5) < 0) {
+        if (mtcp_listen(mctx, s, 2) < 0) {
+            perror("netannounce::mtcp_listen()");
             mtcp_close(mctx, s);
             return -1;
         }
