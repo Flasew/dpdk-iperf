@@ -457,12 +457,6 @@ setnonblocking(int fd, int nonblocking)
             return -1;
        }
     }
-    else {
-        if (mtcp_setsock_block(mctx, fd) < 0) {
-            perror("mtcp_setsock_block");
-            return -1;
-       }
-    }
     return 0;
 }
 
